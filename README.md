@@ -46,4 +46,3 @@ Still on the list:
 
 - A tag optimizer to go alongside this one, covering UDT, global, and local tags.
 - Smarter alignment handling that accounts for differences between firmware versions.
-- Tying into the other LLM4ICS modules.
