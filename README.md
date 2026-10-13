@@ -2,7 +2,7 @@
 
 A local web app that reduces the memory footprint of Allen-Bradley (Studio 5000 Logix Designer) user-defined data types. It reorders UDT members by size and packs BOOLs together so the controller wastes fewer padding bytes. Every change is shown side by side before you download anything.
 
-<img width="1835" height="882" alt="image" src="https://github.com/user-attachments/assets/7291c258-ef88-4abc-a7a6-0dae31b2e599" />
+<img width="1892" height="1021" alt="image" src="https://github.com/user-attachments/assets/ea66334f-e145-4262-b04c-1d11f2fa92a5" />
 
 ## Read this before importing
 
@@ -13,9 +13,6 @@ Reordering members changes their byte offsets. Anything that reads a UDT **by na
 - Produced / consumed tags (the partner controller holds its own copy of the definition)
 - HMI, SCADA or other devices that read the structure by offset
 
-When you upload a full controller export, the optimizer scans rungs, structured text, MSG configurations and tags for the first three, and flags every affected UDT (and every UDT nested inside one) as **Layout risk**. It cannot see HMI projects or other controllers, so check those yourself. A single-UDT export contains no logic, so the scan cannot run on it.
-
-The sizes shown are estimates from a simplified Logix layout model, not values read from Studio 5000.
 
 ## What it does
 
@@ -67,12 +64,6 @@ Each fixed bug has a regression test: no member is ever dropped; CDATA and every
 - The grouping puts 8-byte types (LREAL, LINT) after the 4-byte group, which can leave up to 4 bytes of padding before them. Ordering largest-first would avoid this; it is not done yet.
 - Existing tag values: when Studio 5000 replaces a UDT definition, check that tag values are kept. Back up the project first.
 - Function block (FBD) and SFC routines are not scanned for COP/CPS.
-
-## Roadmap
-
-- Tag optimizer covering controller and program tags
-- Largest-first ordering option
-- Verify size estimates against Studio 5000's reported data type sizes
 
 ## Licence
 
