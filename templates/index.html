@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>L5X UDT Optimizer</title>
+  <link rel="icon" type="image/x-icon" href="/static/AnyOT.ico"/>
+  <script>
+    // Set theme before first paint so dark mode never flashes white.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('anyot-theme'); } catch (e) {}
+      if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+      document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+    })();
+  </script>
+  <style>
+  /* System fonts only: plant PCs are often offline, and a tool that edits
+     controller files should not phone out to a font CDN. */
+  :root {
+    --bg:#F0F2F5; --surface:#FFFFFF; --panel:#F7F8FA;
+    --border:#E2E6ED; --border-mid:#CBD2DC;
+    --accent:#0057B8; --accent-h:#0046A0; --accent-sub:#EBF2FF;
+    --success:#0A7E4A; --success-bg:#EDFBF3; --success-br:#B3EDCF;
+    --warn:#B45309; --warn-bg:#FFFBEB; --warn-br:#FDE68A;
+    --danger:#B91C1C; --danger-bg:#FEF2F2; --danger-br:#FECACA;
+    --text:#111827; --text-2:#374151; --muted:#6B7280; --muted-2:#9CA3AF;
+    --radius:6px; --radius-lg:10px;
+    --shadow:0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    --font-ui: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, "Liberation Mono", monospace;
+  }
+  [data-theme="dark"] {
+    --bg:#111318; --surface:#1C1F27; --panel:#22262F;
+    --border:#2D3240; --border-mid:#3D4455;
+    --accent:#3B82F6; --accent-h:#60A5FA; --accent-sub:#1E2A3F;
+    --success:#34D399; --success-bg:#0A2E1F; --success-br:#065F46;
+    --warn:#FBBF24; --warn-bg:#2D2200; --warn-br:#78350F;
+    --danger:#F87171; --danger-bg:#2D1010; --danger-br:#7F1D1D;
+    --text:#F1F3F7; --text-2:#C9CDD8; --muted:#8B92A5; --muted-2:#5C6278;
+    --shadow:0 1px 3px rgba(0,0,0,.3);
+  }
+  *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:var(--font-ui); background:var(--bg); color:var(--text);
+         min-height:100vh; font-size:14px; line-height:1.5; }
+  button, input, select { font:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  [hidden] { display:none !important; }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+
+  /* Top bar */
+  .topbar { background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
+  .wrap { width:92%; max-width:1200px; margin:0 auto; }
+  .topbar .wrap { height:52px; display:flex; align-items:center; justify-content:space-between; }
+  .brand { font-weight:800; font-size:1.02rem; letter-spacing:-.02em; }
+  .brand span { color:var(--accent); }
+  .ghost-btn { display:inline-flex; align-items:center; gap:6px; padding:.35rem .75rem;
+    border:1px solid var(--border); border-radius:var(--radius); background:var(--panel);
+    color:var(--muted); font-size:.8rem; font-weight:500; cursor:pointer; }
+  .ghost-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  main.wrap { padding:1.75rem 0 4rem; display:flex; flex-direction:column; gap:1rem; }
+  .title h1 { font-size:clamp(1.35rem,3vw,1.75rem); font-weight:700; letter-spacing:-.02em; }
+  .title p { color:var(--muted); max-width:70ch; margin-top:.15rem; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow); overflow:hidden; }
+
+  /* Drop zone */
+  #drop-zone { margin:1rem; border:2px dashed var(--border-mid); border-radius:var(--radius-lg);
+    padding:2rem 1rem; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+  #drop-zone.hover { border-color:var(--accent); background:var(--accent-sub); }
+  #drop-zone.has-file { border-style:solid; border-color:var(--accent); background:var(--accent-sub); padding:1.1rem 1rem; }
+  .drop-label { font-weight:600; font-size:1rem; }
+  .drop-sub { color:var(--muted); font-size:.85rem; margin-top:.2rem; }
+  .drop-actions { margin-top:1rem; }
+  #drop-zone.has-file .drop-actions { margin-top:.6rem; }
+
+  .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.5rem 1.05rem; border:none;
+    border-radius:var(--radius); font-size:.875rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-h); }
+  .btn-outline { background:transparent; color:var(--text-2); border:1px solid var(--border-mid); }
+  .btn-outline:hover { border-color:var(--accent); color:var(--accent); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+
+  /* Alert */
+  .alert { display:none; gap:.6rem; align-items:flex-start; padding:.75rem 1rem; border-top:1px solid var(--border); font-size:.875rem; }
+  .alert.show { display:flex; }
+  .alert.info    { background:var(--accent-sub); color:var(--accent); }
+  .alert.success { background:var(--success-bg); color:var(--success); }
+  .alert.error   { background:var(--danger-bg);  color:var(--danger); }
+  .alert.warn    { background:var(--warn-bg);    color:var(--warn); }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-top-color:transparent;
+          border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0; margin-top:.2rem; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration:2.5s; } }
+
+  /* Results */
+  #results { display:none; }
+  .summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); border-bottom:1px solid var(--border); }
+  .stat { padding:.85rem 1rem; border-right:1px solid var(--border); }
+  .stat:last-child { border-right:none; }
+  .stat .n { font-size:1.45rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2; }
+  .stat .l { color:var(--muted); font-size:.8rem; }
+  .stat.saved .n { color:var(--success); }
+  .stat.risky .n { color:var(--warn); }
+
+  .notice { padding:.7rem 1rem; font-size:.85rem; border-bottom:1px solid var(--border); }
+  .notice.warn { background:var(--warn-bg); color:var(--warn); }
+  .notice.plain { background:var(--panel); color:var(--text-2); }
+  .notice strong { font-weight:700; }
+
+  .progress { height:3px; background:var(--border); }
+  .progress > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+
+  .toolbar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; padding:.7rem 1rem; border-bottom:1px solid var(--border); background:var(--panel); }
+  .chips { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .chip { padding:.25rem .65rem; border:1px solid var(--border-mid); border-radius:999px; background:var(--surface);
+          font-size:.8rem; cursor:pointer; color:var(--text-2); }
+  .chip[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .chip .c { font-variant-numeric:tabular-nums; opacity:.75; margin-left:.25rem; }
+  .toolbar .grow { flex:1; }
+  .toolbar input, .toolbar select { padding:.3rem .55rem; border:1px solid var(--border-mid); border-radius:var(--radius);
+          background:var(--surface); font-size:.82rem; }
+  .toolbar input { min-width:170px; }
+
+  /* Table */
+  .table-wrap { max-height:62vh; overflow:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  thead th { position:sticky; top:0; background:var(--surface); text-align:left; font-weight:600; color:var(--muted);
+             padding:.5rem 1rem; border-bottom:1px solid var(--border); font-size:.78rem; z-index:1; }
+  th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr.row { cursor:pointer; border-bottom:1px solid var(--border); }
+  tbody tr.row:hover { background:var(--panel); }
+  tbody td { padding:.5rem 1rem; vertical-align:middle; }
+  .name { font-family:var(--font-mono); font-weight:600; word-break:break-all; }
+  .caret { display:inline-block; width:1rem; color:var(--muted); transition:transform .15s; }
+  tr.open .caret { transform:rotate(90deg); }
+  .tag { display:inline-block; font-family:var(--font-ui); font-size:.7rem; font-weight:600; padding:.05rem .4rem; border-radius:4px;
+         margin-left:.4rem; border:1px solid; vertical-align:1px; }
+  .tag.aoi  { color:var(--accent); background:var(--accent-sub); border-color:var(--accent); }
+  .tag.risk { color:var(--warn); background:var(--warn-bg); border-color:var(--warn-br); }
+  .saved { color:var(--success); font-weight:600; }
+  .st { font-weight:600; white-space:nowrap; }
+  .st.done { color:var(--success); } .st.ok { color:var(--muted); } .st.na, .st.skip { color:var(--warn); }
+  .st.error { color:var(--danger); } .st.processing { color:var(--accent); } .st.waiting { color:var(--muted-2); }
+
+  tr.detail td { background:var(--panel); padding:0; border-bottom:1px solid var(--border); }
+  .detail-body { padding:.85rem 1rem 1rem 2.4rem; display:flex; flex-direction:column; gap:.7rem; }
+  .why { font-size:.85rem; color:var(--text-2); max-width:90ch; }
+  .why.warn { color:var(--warn); }
+  .why ul { margin:.25rem 0 0 1.1rem; }
+  .diff { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+  .diff h4 { font-size:.78rem; color:var(--muted); font-weight:600; margin-bottom:.3rem; }
+  .diff ol { list-style:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+  .diff li { display:flex; gap:.6rem; padding:.22rem .6rem; font-family:var(--font-mono); font-size:.78rem; border-bottom:1px solid var(--border); }
+  .diff li:last-child { border-bottom:none; }
+  .diff .i { color:var(--muted-2); min-width:2ch; text-align:right; }
+  .diff .t { color:var(--muted); margin-left:auto; }
+  .diff li.moved { background:var(--accent-sub); }
+  .empty { padding:1.5rem 1rem; color:var(--muted); text-align:center; }
+
+  .dlbar { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; justify-content:flex-end; padding:.85rem 1rem; border-top:1px solid var(--border); }
+  .dlbar .hint { margin-right:auto; color:var(--muted); font-size:.82rem; max-width:60ch; }
+
+  @media (max-width:640px) {
+    .col-members { display:none; }
+    .diff { grid-template-columns:1fr; }
+    .detail-body { padding-left:1rem; }
+  }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand">Anything<span>OT</span></div>
+    <button class="ghost-btn" id="theme-btn" type="button" aria-label="Toggle dark mode">
+      <span id="theme-icon" aria-hidden="true">🌙</span><span id="theme-label">Dark mode</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="title">
+    <h1>UDT Memory Optimizer</h1>
+    <p>Reorders UDT members by size and packs BOOLs together to cut padding. Review every change before you download.</p>
+  </div>
+
+  <section class="card" aria-label="Upload">
+    <div id="drop-zone" role="button" tabindex="0" aria-describedby="drop-sub">
+      <p class="drop-label" id="drop-label">Drop a .L5X file here</p>
+      <p class="drop-sub" id="drop-sub">A single UDT export or a full controller export</p>
+      <div class="drop-actions">
+        <button class="btn btn-primary" id="browse-btn" type="button">Choose file</button>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept=".l5x,.L5X" class="sr-only" tabindex="-1"/>
+    <div class="alert" id="alert" role="status" aria-live="polite">
+      <span id="alert-icon" aria-hidden="true"></span><span id="alert-text"></span>
+    </div>
+  </section>
+
+  <section class="card" id="results" aria-label="Results">
+    <div class="summary">
+      <div class="stat"><div class="n" id="s-changed">0</div><div class="l">Reordered</div></div>
+      <div class="stat"><div class="n" id="s-ok">0</div><div class="l">Already optimal</div></div>
+      <div class="stat"><div class="n" id="s-skip">0</div><div class="l">Not processed</div></div>
+      <div class="stat risky"><div class="n" id="s-risk">0</div><div class="l">Reordered with layout risk</div></div>
+      <div class="stat saved"><div class="n" id="s-saved">0 B</div><div class="l">Estimated bytes saved</div></div>
+    </div>
+    <div id="notice"></div>
+    <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+
+    <div class="toolbar">
+      <div class="chips" role="group" aria-label="Filter">
+        <button class="chip" data-f="all" aria-pressed="true">All<span class="c" id="c-all"></span></button>
+        <button class="chip" data-f="done" aria-pressed="false">Reordered<span class="c" id="c-done"></span></button>
+        <button class="chip" data-f="risk" aria-pressed="false">Layout risk<span class="c" id="c-risk"></span></button>
+        <button class="chip" data-f="ok" aria-pressed="false">Already optimal<span class="c" id="c-ok"></span></button>
+        <button class="chip" data-f="skip" aria-pressed="false">Not processed<span class="c" id="c-skip"></span></button>
+      </div>
+      <span class="grow"></span>
+      <label class="sr-only" for="q">Search UDTs</label>
+      <input id="q" type="search" placeholder="Search UDT name"/>
+      <label class="sr-only" for="sort">Sort</label>
+      <select id="sort">
+        <option value="order">Dependency order</option>
+        <option value="name">Name</option>
+        <option value="saved">Bytes saved</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>UDT</th><th class="num col-members">Members</th><th class="num">Size (est.)</th><th>Result</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No UDTs match this filter.</div>
+    </div>
+
+    <div class="dlbar">
+      <span class="hint" id="dl-hint"></span>
+      <button class="btn btn-outline" id="dl-zip" type="button" hidden>Download changed UDTs (.zip)</button>
+      <button class="btn btn-primary" id="dl-main" type="button" disabled>Download optimized file</button>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ── Utilities ─────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtType = m => m.dim > 0 ? `${m.type}[${m.dim}]` : m.type;
+
+/* ── Theme ─────────────────────────────────────────────────────────────── */
+function paintThemeBtn() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  $('theme-icon').textContent = dark ? '☀️' : '🌙';
+  $('theme-label').textContent = dark ? 'Light mode' : 'Dark mode';
+}
+$('theme-btn').addEventListener('click', () => {
+  const dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  try { localStorage.setItem('anyot-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  paintThemeBtn();
+});
+paintThemeBtn();
+
+/* ── Alert ─────────────────────────────────────────────────────────────── */
+function alertMsg(kind, text) {
+  const a = $('alert');
+  a.className = `alert show ${kind}`;
+  $('alert-icon').innerHTML = kind === 'info' ? '<span class="spin"></span>'
+    : ({success:'✔', error:'✖', warn:'⚠'}[kind] || '');
+  $('alert-text').textContent = text;
+}
+
+/* ── State ─────────────────────────────────────────────────────────────── */
+const S = { session:null, kind:null, source:'', rows:new Map(), order:[], filter:'all',
+            open:new Set(), downloads:{}, finished:false, es:null };
+
+/* ── File selection ────────────────────────────────────────────────────── */
+const dz = $('drop-zone'), fileInput = $('file-input');
+dz.addEventListener('click', e => { if (e.target === dz || !e.target.closest('button')) fileInput.click(); });
+dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+$('browse-btn').addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('hover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('hover'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('hover');
+  const f = e.dataTransfer.files[0]; if (f) handleFile(f); });
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  fileInput.value = '';            // so choosing the same file again still fires
+  if (f) handleFile(f);
+});
+
+async function handleFile(file) {
+  if (!/\.l5x$/i.test(file.name)) { alertMsg('error', 'Choose a .L5X file exported from Studio 5000.'); return; }
+  if (S.es) { S.es.close(); S.es = null; }
+  dz.classList.add('has-file');
+  $('drop-label').textContent = file.name;
+  $('drop-sub').textContent = `${(file.size / 1024).toFixed(1)} KB`;
+  $('browse-btn').textContent = 'Choose another file';
+  $('results').style.display = 'none';
+  alertMsg('info', `Reading ${file.name}…`);
+
+  const fd = new FormData(); fd.append('file', file);
+  let data;
+  try {
+    const r = await fetch('/analyze', { method:'POST', body:fd });
+    data = await r.json();
+  } catch (err) { alertMsg('error', `Could not reach the optimizer: ${err.message}`); return; }
+  if (!data.success) { alertMsg('error', data.error); return; }
+  startRun(data);
+}
+
+/* ── Run ───────────────────────────────────────────────────────────────── */
+function startRun(p) {
+  Object.assign(S, { session:p.session, kind:p.kind, source:p.source, rows:new Map(), order:[],
+                     open:new Set(), downloads:{}, finished:false });
+  p.udts.forEach((u, i) => {
+    S.order.push(u.name);
+    S.rows.set(u.name, { name:u.name, idx:i, status:'waiting', member_count:u.member_count,
+                         size_before:u.size_before, size_after:u.size_before, risk:[], aoi_members:[],
+                         before:[], after:[], reason:'' });
+  });
+  $('notice').innerHTML = p.kind === 'single_udt'
+    ? `<div class="notice plain">Single UDT exports contain no logic or tags, so layout dependencies (COP/CPS, MSG, produced/consumed tags) cannot be checked. Run the full controller export to see them.</div>`
+    : '';
+  $('dl-main').disabled = true; $('dl-zip').hidden = true; $('dl-hint').textContent = '';
+  $('bar').style.width = '0%';
+  $('results').style.display = 'block';
+  render();
+  alertMsg('info', `Optimizing ${p.udts.length} UDT${p.udts.length === 1 ? '' : 's'}…`);
+
+  let done = 0;
+  const es = new EventSource(`/stream/${p.session}`);
+  S.es = es;
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'progress') {
+      const row = S.rows.get(m.name); if (!row) return;
+      Object.assign(row, m);
+      if (m.status !== 'processing') { done++; $('bar').style.width = `${(done / S.order.length) * 100}%`; }
+      scheduleRender();
+    } else if (m.type === 'done') {
+      es.close(); S.es = null; S.finished = true; S.downloads = m.downloads || {};
+      finish(m);
+    } else if (m.type === 'error') {
+      es.close(); S.es = null; alertMsg('error', m.message);
+    }
+  };
+  es.onerror = () => { if (!S.finished) { es.close(); S.es = null;
+    alertMsg('error', 'Lost connection to the optimizer. Check that app.py is still running, then upload again.'); } };
+}
+
+function finish(m) {
+  $('bar').style.width = '100%';
+  render();
+  const single = S.kind === 'single_udt';
+  if (single) {
+    const row = S.rows.get(S.order[0]);
+    $('dl-main').textContent = 'Download optimized UDT';
+    $('dl-main').disabled = !S.downloads.udt;
+    $('dl-hint').textContent = S.downloads.udt
+      ? `Saves as ${S.downloads.udt}`
+      : (row.status === 'ok' ? 'Already optimal, nothing to download.' : 'No file was produced. Expand the row to see why.');
+  } else {
+    $('dl-main').textContent = 'Download full program';
+    $('dl-main').disabled = !S.downloads.program;
+    $('dl-zip').hidden = !S.downloads.zip;
+    $('dl-hint').textContent = S.downloads.program
+      ? `Only reordered UDTs are changed; everything else is byte-for-byte the original. Saves as ${S.downloads.program}`
+      : 'Every UDT is already optimal or was not processed, so there is nothing to download.';
+  }
+  const risky = m.risk_changed || [];
+  if (risky.length) {
+    $('notice').innerHTML = `<div class="notice warn"><strong>${risky.length} reordered UDT${risky.length === 1 ? '' : 's'} ${risky.length === 1 ? 'is' : 'are'} copied by byte offset somewhere</strong> (COP/CPS, MSG, or a produced/consumed tag). Reordering changes those offsets. Check each one under “Layout risk” before importing, or leave it out by importing UDTs one at a time from the zip.</div>`;
+  }
+  const saved = m.total_saved || 0;
+  alertMsg(risky.length ? 'warn' : 'success',
+    `Done. ${m.changed} of ${m.total} reordered, about ${saved} B saved.` + (risky.length ? ' Review the layout-risk UDTs before importing.' : ''));
+}
+
+/* ── Rendering ─────────────────────────────────────────────────────────── */
+let rq = false;
+function scheduleRender() { if (!rq) { rq = true; requestAnimationFrame(() => { rq = false; render(); }); } }
+
+const LABEL = { waiting:'Waiting', processing:'Optimizing…', done:'Reordered', ok:'Already optimal',
+                na:'Not processed', skip:'Not processed', error:'Error' };
+const bucket = r => (r.status === 'na' || r.status === 'skip' || r.status === 'error') ? 'skip' : r.status;
+const savedOf = r => r.status === 'done' ? Math.max(0, r.size_before - r.size_after) : 0;
+
+function render() {
+  const rows = [...S.rows.values()];
+  const cnt = { all:rows.length, done:0, ok:0, skip:0, risk:0 };
+  let saved = 0, riskChanged = 0;
+  rows.forEach(r => {
+    const b = bucket(r); if (cnt[b] !== undefined) cnt[b]++;
+    if (r.risk && r.risk.length) { cnt.risk++; if (r.status === 'done') riskChanged++; }
+    saved += savedOf(r);
+  });
+  $('s-changed').textContent = cnt.done; $('s-ok').textContent = cnt.ok; $('s-skip').textContent = cnt.skip;
+  $('s-risk').textContent = riskChanged; $('s-saved').textContent = `${saved} B`;
+  for (const k of ['all','done','risk','ok','skip']) $('c-' + k).textContent = cnt[k];
+
+  const q = $('q').value.trim().toLowerCase();
+  let view = rows.filter(r =>
+    (S.filter === 'all' || (S.filter === 'risk' ? r.risk.length > 0 : bucket(r) === S.filter)) &&
+    (!q || r.name.toLowerCase().includes(q)));
+  const sort = $('sort').value;
+  if (sort === 'name') view.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric:true }));
+  else if (sort === 'saved') view.sort((a, b) => savedOf(b) - savedOf(a) || a.idx - b.idx);
+  else view.sort((a, b) => a.idx - b.idx);
+
+  $('tbody').innerHTML = view.map(rowHTML).join('');
+  $('empty').hidden = view.length > 0;
+}
+
+function sizeCell(r) {
+  if (r.status === 'done' && r.size_before !== r.size_after)
+    return `${r.size_before} → ${r.size_after} B <span class="saved">−${r.size_before - r.size_after}</span>`;
+  return r.size_before ? `${r.size_before} B` : '—';
+}
+
+function rowHTML(r) {
+  const open = S.open.has(r.name);
+  const tags = (r.aoi_members && r.aoi_members.length ? '<span class="tag aoi">AOI</span>' : '')
+             + (r.risk && r.risk.length ? '<span class="tag risk">Layout risk</span>' : '');
+  const st = r.status === 'processing' ? '<span class="spin" style="width:11px;height:11px;border-width:1.5px;margin:0 .3rem -1px 0"></span>' : '';
+  const expandable = r.status !== 'waiting' && r.status !== 'processing';
+  let html = `<tr class="row${open ? ' open' : ''}" data-n="${esc(r.name)}" ${expandable ? 'tabindex="0" aria-expanded="' + open + '"' : ''}>
+    <td><span class="caret" aria-hidden="true">${expandable ? '▸' : ''}</span><span class="name">${esc(r.name)}</span>${tags}</td>
+    <td class="num col-members">${r.member_count}</td>
+    <td class="num">${sizeCell(r)}</td>
+    <td><span class="st ${r.status}">${st}${LABEL[r.status] || esc(r.status)}</span></td></tr>`;
+  if (open && expandable) html += `<tr class="detail"><td colspan="4">${detailHTML(r)}</td></tr>`;
+  return html;
+}
+
+function detailHTML(r) {
+  let parts = [];
+  if (r.status === 'na' || r.status === 'skip' || r.status === 'error')
+    parts.push(`<p class="why warn">${esc(r.reason || 'Not processed.')}</p>`);
+  if (r.status === 'ok')
+    parts.push('<p class="why">Members are already in size order with BOOLs packed. The file keeps this UDT unchanged.</p>');
+  if (r.risk && r.risk.length) {
+    const shown = r.risk.slice(0, 8).map(x => `<li>${esc(x)}</li>`).join('');
+    const more = r.risk.length > 8 ? `<li>…and ${r.risk.length - 8} more</li>` : '';
+    parts.push(`<div class="why warn">This UDT's byte layout is relied on by:<ul>${shown}${more}</ul></div>`);
+  }
+  if (r.aoi_members && r.aoi_members.length)
+    parts.push(`<p class="why">AOI-typed members carried through unchanged: ${esc(r.aoi_members.join(', '))}</p>`);
+  if (r.status === 'done') {
+    const pos = new Map(r.before.map((m, i) => [m.name, i]));
+    const list = (arr, mark) => arr.map((m, i) =>
+      `<li class="${mark && pos.get(m.name) !== i ? 'moved' : ''}"><span class="i">${i + 1}</span><span>${esc(m.name)}</span><span class="t">${esc(fmtType(m))}</span></li>`).join('');
+    parts.push(`<div class="diff">
+      <div><h4>Before</h4><ol>${list(r.before, false)}</ol></div>
+      <div><h4>After (moved members highlighted)</h4><ol>${list(r.after, true)}</ol></div></div>`);
+  }
+  return `<div class="detail-body">${parts.join('')}</div>`;
+}
+
+/* ── Table interaction ─────────────────────────────────────────────────── */
+function toggleRow(tr) {
+  const n = tr.dataset.n; const r = S.rows.get(n);
+  if (!r || r.status === 'waiting' || r.status === 'processing') return;
+  S.open.has(n) ? S.open.delete(n) : S.open.add(n);
+  render();
+  const again = [...document.querySelectorAll('tr.row')].find(x => x.dataset.n === n);
+  if (again) again.focus();
+}
+$('tbody').addEventListener('click', e => { const tr = e.target.closest('tr.row'); if (tr) toggleRow(tr); });
+$('tbody').addEventListener('keydown', e => {
+  const tr = e.target.closest('tr.row');
+  if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleRow(tr); }
+});
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+  S.filter = c.dataset.f;
+  document.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', x === c));
+  render();
+}));
+$('q').addEventListener('input', render);
+$('sort').addEventListener('change', render);
+
+/* ── Downloads (fetch, so a failure never navigates away from results) ── */
+async function download(kind, btn) {
+  if (!S.session || !S.downloads[kind]) return;
+  const label = btn.textContent; btn.disabled = true; btn.textContent = 'Preparing…';
+  try {
+    const r = await fetch(`/download/${S.session}/${kind}`);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href:url, download:S.downloads[kind] });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    alertMsg('error', `Download failed: ${err.message}`);
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
+$('dl-main').addEventListener('click', () => download(S.kind === 'single_udt' ? 'udt' : 'program', $('dl-main')));
+$('dl-zip').addEventListener('click', () => download('zip', $('dl-zip')));
+</script>
+</body>
+</html>
