@@ -21,7 +21,7 @@ TYPE_SIZES = {
 }
 
 # ---------------------------------------------------------------------------
-# Sort groups
+# Sort groups (applied within each alignment class, see member_sort_key)
 #   0  BOOL scalar
 #   1  SINT scalar
 #   2  INT  scalar
@@ -81,24 +81,44 @@ def sanitize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name.strip())
 
 
+_ALIGN_CLASS = {"BOOL": 1, "SINT": 1, "INT": 2, "MESSAGE": 2, "LREAL": 8, "LINT": 8}
+
+
 def member_sort_key(member: dict, udt_registry: dict = None, aoi_registry: dict = None) -> tuple:
-    """AOI types sort with group 9 (TIMER/COUNTER group)."""
+    """
+    Order that leaves no avoidable padding: members are sorted by alignment
+    first (1, 2, 4, then 8 bytes), and by the type groups within it.
+
+    Every member's size is a multiple of its alignment, so an order that
+    never steps down in alignment needs the same total size as the best
+    possible order. The old key put all arrays (including LREAL/LINT arrays)
+    in the middle and the 8-byte scalars before STRING/TIMER/UDT members,
+    which stepped down and back up and could waste bytes at each step.
+
+    BOOL arrays are stored as DINTs (4-byte). AOIs, nested UDTs and unknown
+    types are treated as 4-byte aligned, as the size estimate does.
+
+    base_type sits between the group and the name so that types sharing a
+    group (TIMER/COUNTER/CONTROL, AOIs, all UDT-typed members) stay
+    contiguous per exact type instead of interleaving by name.
+    """
     base_type = member["type"].upper()
     is_array  = member.get("dimension", 0) > 0
     is_native = base_type in SUPPORTED_TYPES
     is_udt    = (not is_native) and (udt_registry and member["type"] in udt_registry)
     is_aoi    = (not is_native) and (not is_udt) and (aoi_registry and member["type"] in aoi_registry)
     nk        = natural_key(member["name"])
+    aln       = 4 if (base_type == "BOOL" and is_array) else _ALIGN_CLASS.get(base_type, 4)
 
     if is_array:
         sub = ARRAY_SUBGROUP.get(base_type, 9 if (is_udt or is_aoi) else 10)
-        return (4, sub, nk)
+        return (aln, 4, sub, base_type, nk)
 
     if is_aoi:
-        return (9, 0, nk)
+        return (aln, 9, 0, base_type, nk)
 
     grp = SCALAR_GROUP.get(base_type, 10 if is_udt else 11)
-    return (grp, 0, nk)
+    return (aln, grp, 0, base_type, nk)
 
 
 def _cdata(text: str) -> str:

@@ -13,7 +13,9 @@ from layout_risk import scan_layout_risk
 
 
 def resource_path(rel):
-    base = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    # Next to this file (or PyInstaller's unpack folder), never the current
+    # directory: `python path/to/app.py` must work from anywhere.
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
 
 
