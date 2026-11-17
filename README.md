@@ -18,7 +18,7 @@ Reordering members changes their byte offsets. Anything that reads a UDT **by na
 
 Upload either a single UDT export or a full controller export (`.L5X`).
 
-Members are grouped in this order: BOOLs, SINT, INT, DINT, arrays, REAL, LREAL, LINT, STRING, TIMER/COUNTER/CONTROL and AOIs, then nested UDTs. Members are sorted by name within each group, so the result is deterministic. Consecutive BOOLs share hidden SINT host members, eight bits per host.
+Members are ordered by alignment so no padding is wasted between them: first the 1-byte types (BOOLs, SINT), then INT, then the 4-byte types (DINT, arrays, REAL, STRING, TIMER/COUNTER/CONTROL and AOIs, nested UDTs), and last the 8-byte types (LREAL, LINT, including their arrays). Members of the same data type stay together and are sorted by name, so the result is deterministic. Consecutive BOOLs share hidden SINT host members, eight bits per host.
 
 Preserved exactly: member names, data types, dimensions, radix (Hex, Binary, ASCII, ...), external access, member descriptions, multilingual descriptions, the UDT's own description, and dependencies.
 
@@ -61,7 +61,7 @@ Each fixed bug has a regression test: no member is ever dropped; CDATA and every
 ## Known limitations
 
 - Size estimates are heuristic. Nested UDTs containing LINT/LREAL may be under-aligned in the estimate.
-- The grouping puts 8-byte types (LREAL, LINT) after the 4-byte group, which can leave up to 4 bytes of padding before them. Ordering largest-first would avoid this; it is not done yet.
+- The member order is the best possible under the tool's own size model. It has not been compared with the sizes Studio 5000 reports for every type; check the size shown in Studio 5000 after import.
 - Existing tag values: when Studio 5000 replaces a UDT definition, check that tag values are kept. Back up the project first.
 - Function block (FBD) and SFC routines are not scanned for COP/CPS.
 

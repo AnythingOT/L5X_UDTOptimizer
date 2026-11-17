@@ -355,6 +355,33 @@ def test_app_end_to_end_and_redownload():
         assert {m["name"] for m in row["before"]} == {m["name"] for m in row["after"]}, row["name"]
 
 
+def test_member_order_wastes_no_padding():
+    """The sort order must reach the smallest size any order can reach.
+    Regression: 8-byte arrays sat in the middle and cost up to 16 bytes."""
+    import itertools
+    import random
+    from L5XGen_UDT import member_sort_key
+    from L5XOpt_UDT import _estimate_udt_size
+    reg, aoi = {"Inner": 24}, {"MyAOI": 20}
+    types = ["SINT", "INT", "DINT", "REAL", "LREAL", "LINT", "STRING", "TIMER", "COUNTER", "Inner", "MyAOI"]
+    rnd = random.Random(7)
+    for _ in range(300):
+        ms = [{"name": f"m{i}", "type": rnd.choice(types), "dimension": rnd.choice([0, 0, 1, 3, 5])}
+              for i in range(rnd.randint(1, 6))]
+        got = _estimate_udt_size({"members": sorted(ms, key=lambda m: member_sort_key(m, reg, aoi))}, reg, aoi)
+        best = min(_estimate_udt_size({"members": list(p)}, reg, aoi) for p in itertools.permutations(ms))
+        assert got == best, f"{got} bytes, best possible {best}: {[(m['type'], m['dimension']) for m in ms]}"
+
+
+def test_same_type_members_stay_together():
+    """TIMER and COUNTER share a group; they must not interleave by name."""
+    from L5XGen_UDT import member_sort_key
+    ms = [{"name": n, "type": t, "dimension": 0}
+          for n, t in (("A", "TIMER"), ("B", "COUNTER"), ("C", "TIMER"), ("D", "COUNTER"))]
+    order = [m["type"] for m in sorted(ms, key=member_sort_key)]
+    assert order == ["COUNTER", "COUNTER", "TIMER", "TIMER"], order
+
+
 # ── runner ──────────────────────────────────────────────────────────────────────
 
 def main():
