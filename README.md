@@ -1,5 +1,7 @@
 # L5X UDT Optimizer
 
+> **Archived.** This tool has been integrated into **[LLM4L5X](https://github.com/AnythingOT/LLM4L5X)**: attach a UDT export or a whole program there and press **optimize UDTs**. It gives the same member orders and sizes as this tool on the sample files, keeps every member's XML byte for byte, flags COP/CPS, MSG and produced/consumed risks, and can also create new UDTs. The code lives in its `udt/` folder. New work happens there; this repo is kept read-only for reference.
+
 A local web app that reduces the memory footprint of Allen-Bradley (Studio 5000 Logix Designer) user-defined data types. It reorders UDT members by size and packs BOOLs together so the controller wastes fewer padding bytes. Every change is shown side by side before you download anything.
 
 <img width="1892" height="1021" alt="image" src="https://github.com/user-attachments/assets/ea66334f-e145-4262-b04c-1d11f2fa92a5" />
